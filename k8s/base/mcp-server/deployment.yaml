@@ -28,11 +28,15 @@ spec:
         # image-only.
         - name: mcp-server
           image: traefik/whoami:v1.10
-          args: ["--port", "8080"]
           ports:
             - name: http
               containerPort: 8080
           env:
+            # Port via env, not args — same contract as the api Deployment.
+            - name: PORT
+              value: "8080"
+            - name: WHOAMI_PORT_NUMBER
+              value: "8080"
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-lgtm:4317
             - name: OTEL_SERVICE_NAME
@@ -45,15 +49,19 @@ spec:
           resources:
             requests:
               cpu: 25m
-              memory: 128Mi
+              memory: 256Mi
             limits:
-              memory: 128Mi
+              memory: 256Mi
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
             capabilities:
               drop: ["ALL"]
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
           readinessProbe:
             httpGet:
-              path: /
+              path: /readyz
               port: http
