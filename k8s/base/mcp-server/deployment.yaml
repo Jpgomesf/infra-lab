@@ -18,11 +18,14 @@ spec:
       containers:
         # Stand-in image; the real MCP server must speak streamable HTTP and
         # target spec >= 2026-07-28 (stateless) so any replica can serve any request.
+        # Port 8080 matches the real service in the app repo, so the swap is
+        # image-only.
         - name: mcp-server
           image: traefik/whoami:v1.10
+          args: ["--port", "8080"]
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 8080
           env:
             - name: OTEL_EXPORTER_OTLP_ENDPOINT
               value: http://otel-lgtm:4317
