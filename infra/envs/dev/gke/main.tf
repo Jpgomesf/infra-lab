@@ -21,6 +21,13 @@ terraform {
     plan {
       method = method.aes_gcm.state
     }
+    # terraform_remote_state reads need their own decryption config — the
+    # root state/plan blocks do not cover data sources.
+    remote_state_data_sources {
+      default {
+        method = method.aes_gcm.state
+      }
+    }
   }
 
   required_providers {

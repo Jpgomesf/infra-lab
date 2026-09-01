@@ -244,6 +244,13 @@ encryption {
   plan {
     method = method.aes_gcm.state
   }
+  # Required in any stack that reads another via terraform_remote_state —
+  # the state/plan blocks above do not cover data-source reads:
+  remote_state_data_sources {
+    default {
+      method = method.aes_gcm.state
+    }
+  }
 }
 ```
 
