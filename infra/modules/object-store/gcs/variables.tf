@@ -26,3 +26,9 @@ variable "hmac_service_account_email" {
   type    = string
   default = null
 }
+
+variable "soft_delete_retention_seconds" {
+  description = "null = GCP default (7 days). 0 disables soft delete for churny buckets."
+  type        = number
+  default     = null
+}

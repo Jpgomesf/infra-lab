@@ -1,4 +1,9 @@
+# PSA in audit/warn (not enforce): violations surface as warnings without
+# breaking pods. Flip to enforce once the stateful stand-ins are clean too.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: app
+  labels:
+    pod-security.kubernetes.io/audit: restricted
+    pod-security.kubernetes.io/warn: restricted

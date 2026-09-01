@@ -123,6 +123,33 @@ anything not listed there still fails the PR at HIGH/CRITICAL.
 4. **Bootstrap, then arm CI.** Run `infra/scripts/bootstrap.sh`, then set the
    variables and secrets above. `plan` and `apply` go from skipped to live.
 
+## State encryption (Phase 1, recommended)
+
+`sensitive = true` only redacts CLI output — secrets land in plaintext in the
+GCS state file. After `bootstrap.sh` creates the KMS key, add this block to
+each stack's `terraform {}` in `infra/envs/*/*/main.tf`:
+
+```hcl
+encryption {
+  key_provider "gcp_kms" "state" {
+    kms_encryption_key = "projects/PROJECT/locations/us-central1/keyRings/tofu/cryptoKeys/state"
+    key_length         = 32
+  }
+  method "aes_gcm" "state" {
+    keys = key_provider.gcp_kms.state
+  }
+  state {
+    method   = method.aes_gcm.state
+    enforced = true
+  }
+  plan {
+    method = method.aes_gcm.state
+  }
+}
+```
+
+Note: encrypted state is OpenTofu-only — Terraform proper cannot read it back.
+
 ## Development
 
 ```sh

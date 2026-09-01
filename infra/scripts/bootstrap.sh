@@ -20,6 +20,13 @@ gcloud services enable \
   billingbudgets.googleapis.com \
   --project "${PROJECT_ID}"
 
+echo ">> KMS key for OpenTofu state encryption"
+gcloud services enable cloudkms.googleapis.com --project "${PROJECT_ID}"
+gcloud kms keyrings create tofu --location "${REGION}" \
+  --project "${PROJECT_ID}" 2>/dev/null || true
+gcloud kms keys create state --keyring tofu --location "${REGION}" \
+  --purpose encryption --project "${PROJECT_ID}" 2>/dev/null || true
+
 echo ">> state bucket (versioned)"
 if ! gcloud storage buckets describe "gs://${STATE_BUCKET}" --project "${PROJECT_ID}" >/dev/null 2>&1; then
   gcloud storage buckets create "gs://${STATE_BUCKET}" \
@@ -41,6 +48,8 @@ gcloud iam workload-identity-pools providers create-oidc github-oidc \
   --attribute-condition "assertion.repository == '${GITHUB_REPO}'" 2>/dev/null || true
 
 echo ">> done. Replace REPLACE-tofu-state-bucket with ${STATE_BUCKET} in infra/envs/*/*/main.tf"
+echo ">> then add the state 'encryption' block from the README to each stack, using:"
+echo "   projects/${PROJECT_ID}/locations/${REGION}/keyRings/tofu/cryptoKeys/state"
 echo ">> and wire google-github-actions/auth to the provider printed by:"
 echo "   gcloud iam workload-identity-pools providers describe github-oidc \\"
 echo "     --project ${PROJECT_ID} --location global --workload-identity-pool github \\"

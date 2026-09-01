@@ -15,6 +15,12 @@ spec:
         app: mcp-server
     spec:
       serviceAccountName: mcp-server
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         # Stand-in image; the real MCP server must speak streamable HTTP and
         # target spec >= 2026-07-28 (stateless) so any replica can serve any request.
@@ -42,6 +48,11 @@ spec:
               memory: 128Mi
             limits:
               memory: 128Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
           readinessProbe:
             httpGet:
               path: /

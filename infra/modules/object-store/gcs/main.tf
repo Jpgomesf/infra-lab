@@ -8,6 +8,15 @@ resource "google_storage_bucket" "this" {
   versioning {
     enabled = var.versioning
   }
+
+  # Soft-deleted objects keep billing until the window expires; churny buckets
+  # (CI artifacts, scratch) should set this to 0.
+  dynamic "soft_delete_policy" {
+    for_each = var.soft_delete_retention_seconds != null ? [1] : []
+    content {
+      retention_duration_seconds = var.soft_delete_retention_seconds
+    }
+  }
 }
 
 resource "google_storage_hmac_key" "s3_interop" {
