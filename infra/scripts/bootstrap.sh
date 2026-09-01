@@ -18,6 +18,8 @@ gcloud services enable \
   storage.googleapis.com \
   iamcredentials.googleapis.com \
   billingbudgets.googleapis.com \
+  artifactregistry.googleapis.com \
+  secretmanager.googleapis.com \
   --project "${PROJECT_ID}"
 
 echo ">> KMS key for OpenTofu state encryption"

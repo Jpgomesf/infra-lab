@@ -1,0 +1,59 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - ../../base
+  - gateway.yaml
+
+patches:
+  # Cloud SQL replaces the in-cluster Postgres; GCS (S3-interop) replaces MinIO.
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: postgres
+        namespace: app
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: postgres
+        namespace: app
+  - patch: |-
+      $patch: delete
+      apiVersion: apps/v1
+      kind: StatefulSet
+      metadata:
+        name: minio
+        namespace: app
+  - patch: |-
+      $patch: delete
+      apiVersion: v1
+      kind: Service
+      metadata:
+        name: minio
+        namespace: app
+  # The real API image (digest-pinned at deploy) and the real S3 endpoint.
+  # Targeted at the api Deployment only — a kustomize images: override would
+  # also hit mcp-server, which still runs the stand-in.
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: api
+        namespace: app
+      spec:
+        template:
+          spec:
+            containers:
+              - name: api
+                image: us-central1-docker.pkg.dev/infra-lab-dev-6945/app/api@sha256:a8f6d37dca211e7e8b3671ac4693f43ebf2bc2dcb75630feba1a4d889e4f58e8
+                env:
+                  - name: S3_ENDPOINT
+                    value: https://storage.googleapis.com
+
+# Secrets (postgres-credentials with the Cloud SQL url, minio-credentials with
+# the GCS HMAC pair) are created out-of-band with kubectl for now — never
+# committed. External Secrets Operator + Secret Manager replaces that step.

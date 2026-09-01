@@ -87,6 +87,14 @@ module "api_identity" {
   roles      = ["roles/storage.objectUser"]
 }
 
+# Same-region image pulls are free; the registry lives with the cluster.
+resource "google_artifact_registry_repository" "app" {
+  project       = var.project_id
+  location      = var.region
+  repository_id = "app"
+  format        = "DOCKER"
+}
+
 module "app_bucket" {
   source = "../../../modules/object-store/gcs"
 

@@ -1,0 +1,27 @@
+# Dev-cluster routing entrypoint. Portable HTTPRoutes live in k8s/base; this
+# file is the GKE-specific half: Envoy Gateway with a plain LoadBalancer
+# Service, which makes GKE provision an L4 passthrough NLB (~$18/mo — the
+# first load-balancer cost in the environment).
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  # No parametersRef: Envoy Gateway's default data-plane Service type is
+  # LoadBalancer, which is exactly what we want on GKE.
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: lab
+  namespace: app
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same
