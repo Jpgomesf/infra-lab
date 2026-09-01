@@ -2,8 +2,25 @@ terraform {
   required_version = ">= 1.6"
 
   backend "gcs" {
-    bucket = "REPLACE-tofu-state-bucket"
+    bucket = "infra-lab-dev-6945-tofu-state"
     prefix = "dev/network"
+  }
+
+  encryption {
+    key_provider "gcp_kms" "state" {
+      kms_encryption_key = "projects/infra-lab-dev-6945/locations/us-central1/keyRings/tofu/cryptoKeys/state"
+      key_length         = 32
+    }
+    method "aes_gcm" "state" {
+      keys = key_provider.gcp_kms.state
+    }
+    state {
+      method   = method.aes_gcm.state
+      enforced = true
+    }
+    plan {
+      method = method.aes_gcm.state
+    }
   }
 
   required_providers {

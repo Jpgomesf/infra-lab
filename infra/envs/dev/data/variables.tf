@@ -9,7 +9,7 @@ variable "region" {
 
 variable "state_bucket" {
   type    = string
-  default = "REPLACE-tofu-state-bucket"
+  default = "infra-lab-dev-6945-tofu-state"
 }
 
 variable "db_password" {
