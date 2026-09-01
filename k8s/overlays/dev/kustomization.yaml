@@ -35,6 +35,23 @@ patches:
       metadata:
         name: minio
         namespace: app
+  # No public Grafana: otel-lgtm ships anonymous-admin, and this cluster's
+  # Gateway is an internet-facing LB. Reach it with kubectl port-forward.
+  # MinIO's route dangles (no backend in dev) — dropped for hygiene.
+  - patch: |-
+      $patch: delete
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: grafana
+        namespace: app
+  - patch: |-
+      $patch: delete
+      apiVersion: gateway.networking.k8s.io/v1
+      kind: HTTPRoute
+      metadata:
+        name: minio
+        namespace: app
   # The real API image (digest-pinned at deploy) and the real S3 endpoint.
   # Targeted at the api Deployment only — a kustomize images: override would
   # also hit mcp-server, which still runs the stand-in.
