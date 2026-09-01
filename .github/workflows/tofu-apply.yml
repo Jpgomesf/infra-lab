@@ -1,0 +1,78 @@
+name: tofu-apply
+
+# Applies infra/envs/dev on merge to main. Guarded twice: the `production`
+# environment (required reviewer) and the WIF_PROVIDER repo variable, so the
+# workflow is inert until the GCP project is bootstrapped.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - infra/**
+      - .github/workflows/tofu-apply.yml
+
+permissions:
+  contents: read
+
+# Applies must never overlap or be cancelled midway: they hold the state lock
+# and can leave partially-created resources behind.
+concurrency:
+  group: tofu-apply
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    name: apply dev
+    # Pre-bootstrap guard: nothing to apply until WIF exists.
+    if: vars.WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      id-token: write # OIDC token for Workload Identity Federation
+    env:
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_project_number: ${{ vars.GCP_PROJECT_NUMBER }}
+      TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_billing_account_id: ${{ secrets.BILLING_ACCOUNT_ID }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.3
+          tofu_wrapper: false
+
+      # Order is a hard dependency, not a preference. Each stack is its own
+      # root with its own state, and the later ones read the earlier ones
+      # through `data "terraform_remote_state"`:
+      #
+      #   network  -> creates the VPC and secondary ranges. No dependencies.
+      #   gke      -> reads network's network_id / subnet_id.
+      #   data     -> reads network's network_id for the private Cloud SQL peering.
+      #   platform -> billing budget; last because it is the cheapest to retry
+      #               and depends on nothing the others need.
+      #
+      # `set -e` stops at the first failure, so a broken network stack never
+      # gets a chance to apply gke against stale outputs.
+      - name: Apply stacks in dependency order
+        shell: bash
+        run: |
+          set -euo pipefail
+          for stack in network gke data platform; do
+            echo "::group::apply ${stack}"
+            tofu -chdir="infra/envs/dev/${stack}" init -input=false
+            tofu -chdir="infra/envs/dev/${stack}" apply -input=false -auto-approve
+            echo "::endgroup::"
+          done

@@ -1,0 +1,37 @@
+name: zizmor
+
+# Static analysis of the workflows themselves (zizmor audits GitHub Actions
+# for injection, credential-persistence and permission problems). This is a
+# blocking check: findings at the default `regular` persona fail the job.
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/**
+
+permissions:
+  contents: read
+
+concurrency:
+  group: zizmor-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  zizmor:
+    name: audit workflows
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Run zizmor
+        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        with:
+          inputs: .github/workflows
+          persona: regular
+          # SARIF upload needs code scanning enabled; emit inline annotations
+          # instead and let a non-zero zizmor exit fail the check.
+          advanced-security: false
+          annotations: true

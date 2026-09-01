@@ -1,0 +1,43 @@
+name: lint
+
+# Formatting and manifest-build checks. Touches no cloud APIs, so it is green
+# from the first push, before any GCP project exists.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  lint:
+    name: make lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: 1.12.3
+          tofu_wrapper: false
+
+      # kubectl ships preinstalled on the GitHub-hosted ubuntu-latest image
+      # (Kubernetes tools section of the runner image manifest), so `make lint`
+      # can call `kubectl kustomize` without an install step. This assertion
+      # turns a future runner-image change into an obvious failure here rather
+      # than a confusing one inside the Makefile.
+      - name: Assert kubectl is preinstalled
+        run: kubectl version --client
+
+      - name: make lint
+        run: make lint

@@ -1,0 +1,30 @@
+# Accepted findings for `trivy config` (see .github/workflows/tofu-plan.yml).
+#
+# This file is the accepted-risk register for the IaC scan, not a mute button:
+# every entry needs a reason, and anything not listed here still fails the PR
+# at HIGH/CRITICAL. Re-check these whenever the relevant module changes.
+misconfigurations:
+  - id: AVD-GCP-0048
+    statement: >-
+      Legacy metadata endpoints. Both node pools set
+      workload_metadata_config.mode = GKE_METADATA, which is Workload Identity
+      and blocks the legacy endpoints; GKE has also disabled them by default
+      since 1.12. The check only looks for an explicit
+      metadata.disable-legacy-endpoints entry, which the provider sets for us.
+
+  - id: AVD-GCP-0061
+    statement: >-
+      Master authorized networks. The gke module does support them
+      (var.authorized_networks drives a dynamic
+      master_authorized_networks_config block), but the CIDR list is a personal
+      IP that must not be committed, so the default is empty and the scanner
+      sees an unconfigured cluster. Revisit once dev has a stable egress IP or
+      a bastion, and enable the block unconditionally then.
+
+  - id: AVD-GCP-0015
+    statement: >-
+      Cloud SQL TLS enforcement. The instance has no public IP
+      (ip_configuration.ipv4_enabled = false) and is reachable only over the
+      private VPC peering, so the exposure is limited to in-VPC traffic.
+      Follow-up, not a permanent exception - set ssl_mode = ENCRYPTED_ONLY on
+      the module once the app's DATABASE_URL is confirmed to negotiate TLS.
