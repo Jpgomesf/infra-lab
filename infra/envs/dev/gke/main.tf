@@ -68,6 +68,8 @@ module "cluster" {
   subnetwork = data.terraform_remote_state.network.outputs.subnet_id
 
   authorized_networks = var.authorized_networks
+  # Flip to false (then apply) as the deliberate first step of a destroy.
+  deletion_protection = var.cluster_deletion_protection
 
   spot_machine_type = "e2-medium"
   spot_min_nodes    = 1
