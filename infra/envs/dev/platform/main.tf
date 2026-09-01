@@ -35,6 +35,11 @@ provider "google" {
   project = var.project_id
   region  = var.region
 
+  # The billingbudgets API requires a quota project on every request; with
+  # user ADC that only happens when these two are set.
+  user_project_override = true
+  billing_project       = var.project_id
+
   default_labels = {
     env        = "dev"
     managed-by = "opentofu"

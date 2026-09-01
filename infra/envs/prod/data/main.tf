@@ -54,7 +54,7 @@ module "postgres" {
 module "api_identity" {
   source = "../../../modules/iam/gke-workload-identity"
 
-  name       = "api"
+  name       = "api-identity"
   project_id = var.project_id
   namespace  = "app"
   ksa_name   = "api"
