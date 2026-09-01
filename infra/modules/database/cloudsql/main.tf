@@ -16,11 +16,14 @@ resource "google_sql_database_instance" "this" {
     ip_configuration {
       ipv4_enabled    = false
       private_network = var.network_id
+      ssl_mode        = "ENCRYPTED_ONLY"
     }
 
     backup_configuration {
       enabled                        = var.backups_enabled
       point_in_time_recovery_enabled = var.backups_enabled
+      # PITR window; billed as instance disk, separate from backup retention.
+      transaction_log_retention_days = var.backups_enabled ? var.transaction_log_retention_days : null
     }
   }
 }

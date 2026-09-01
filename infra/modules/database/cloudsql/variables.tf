@@ -41,6 +41,12 @@ variable "backups_enabled" {
   default = true
 }
 
+variable "transaction_log_retention_days" {
+  description = "PITR window (1-7 on Enterprise edition)."
+  type        = number
+  default     = 7
+}
+
 variable "deletion_protection" {
   type    = bool
   default = true

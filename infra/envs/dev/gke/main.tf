@@ -17,6 +17,11 @@ terraform {
 provider "google" {
   project = var.project_id
   region  = var.region
+
+  default_labels = {
+    env        = "dev"
+    managed-by = "opentofu"
+  }
 }
 
 data "terraform_remote_state" "network" {
