@@ -1,0 +1,20 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: app
+
+resources:
+  - namespace.yaml
+  - network-policies.yaml
+  - api/serviceaccount.yaml
+  - api/deployment.yaml
+  - api/service.yaml
+  - mcp-server/serviceaccount.yaml
+  - mcp-server/deployment.yaml
+  - mcp-server/service.yaml
+  - postgres/statefulset.yaml
+  - postgres/service.yaml
+  - minio/statefulset.yaml
+  - minio/service.yaml
+  - otel-lgtm/deployment.yaml
+  - otel-lgtm/service.yaml

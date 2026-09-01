@@ -1,0 +1,27 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: app
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+generatorOptions:
+  disableNameSuffixHash: true
+
+# Local-only throwaway credentials. Cloud overlays get these from
+# Secret Manager via External Secrets Operator instead.
+secretGenerator:
+  - name: postgres-credentials
+    literals:
+      - POSTGRES_USER=app
+      - POSTGRES_PASSWORD=localdev
+      - POSTGRES_DB=app
+      - url=postgres://app:localdev@postgres:5432/app
+  - name: minio-credentials
+    literals:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin-local
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin-local
