@@ -19,3 +19,9 @@ variable "monthly_budget_usd" {
   type    = number
   default = 100
 }
+
+variable "account_monthly_budget_usd" {
+  description = "Backstop across the whole billing account, all projects."
+  type        = number
+  default     = 150
+}

@@ -35,6 +35,49 @@ if ! gcloud storage buckets describe "gs://${STATE_BUCKET}" --project "${PROJECT
 fi
 gcloud storage buckets update "gs://${STATE_BUCKET}" --versioning
 
+# Versioning enables recovery; lifecycle keeps it from growing forever.
+LIFECYCLE_FILE=$(mktemp)
+cat > "${LIFECYCLE_FILE}" <<'JSON'
+{"rule": [{"action": {"type": "Delete"}, "condition": {"daysSinceNoncurrentTime": 90}}]}
+JSON
+gcloud storage buckets update "gs://${STATE_BUCKET}" --lifecycle-file="${LIFECYCLE_FILE}"
+rm -f "${LIFECYCLE_FILE}"
+
+echo ">> scoped CI service account (never grant editor/owner to CI)"
+SA="tofu-ci@${PROJECT_ID}.iam.gserviceaccount.com"
+gcloud iam service-accounts create tofu-ci \
+  --display-name "OpenTofu CI" --project "${PROJECT_ID}" 2>/dev/null || true
+# Minimum roles for the four stacks. resourcemanager.projectIamAdmin is the
+# widest one and exists because the iam capability manages project bindings.
+for role in \
+  roles/compute.networkAdmin \
+  roles/container.admin \
+  roles/iam.serviceAccountAdmin \
+  roles/iam.serviceAccountUser \
+  roles/resourcemanager.projectIamAdmin \
+  roles/cloudsql.admin \
+  roles/storage.admin \
+  roles/servicenetworking.networksAdmin \
+  roles/monitoring.editor \
+  roles/logging.configWriter; do
+  gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+    --member "serviceAccount:${SA}" --role "${role}" \
+    --condition=None --quiet >/dev/null
+done
+gcloud kms keys add-iam-policy-binding state \
+  --keyring tofu --location "${REGION}" --project "${PROJECT_ID}" \
+  --member "serviceAccount:${SA}" \
+  --role roles/cloudkms.cryptoKeyEncrypterDecrypter --quiet >/dev/null
+POOL_NAME=$(gcloud iam workload-identity-pools describe github \
+  --project "${PROJECT_ID}" --location global --format 'value(name)')
+gcloud iam service-accounts add-iam-policy-binding "${SA}" \
+  --project "${PROJECT_ID}" --role roles/iam.workloadIdentityUser \
+  --member "principalSet://iam.googleapis.com/${POOL_NAME}/attribute.repository/${GITHUB_REPO}" \
+  --quiet >/dev/null
+echo ">> NOTE: budgets need a billing-account grant only a billing admin can make:"
+echo "   gcloud billing accounts add-iam-policy-binding <ACCOUNT_ID> \\"
+echo "     --member serviceAccount:${SA} --role roles/billing.costsManager"
+
 echo ">> workload identity federation for GitHub Actions (no SA keys, ever)"
 gcloud iam workload-identity-pools create github \
   --project "${PROJECT_ID}" --location global \

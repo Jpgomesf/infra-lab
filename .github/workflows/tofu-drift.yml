@@ -1,0 +1,118 @@
+name: tofu-drift
+
+# Weekly drift detection: `tofu plan -detailed-exitcode` per armed stack.
+# Exit 0 = clean, 2 = drift (or unapplied changes), 1 = error. Any drift
+# opens/updates a single tracking issue. Console-created resources are a bug;
+# this is what catches them (the GitOps side has Argo CD for the same job).
+#
+# Guarded like plan/apply: inert until WIF_PROVIDER is set. Covers envs/dev
+# only until prod/aws are armed.
+
+on:
+  schedule:
+    - cron: "0 9 * * 1" # Mondays 09:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: tofu-drift
+  cancel-in-progress: false
+
+env:
+  TOFU_VERSION: 1.12.3
+
+jobs:
+  drift:
+    name: drift check (dev)
+    if: vars.WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC for Workload Identity Federation
+      issues: write # report drift as an issue
+    env:
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_project_number: ${{ vars.GCP_PROJECT_NUMBER }}
+      TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_billing_account_id: ${{ secrets.BILLING_ACCOUNT_ID }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      - name: Plan every stack, collect drift
+        id: scan
+        shell: bash
+        run: |
+          set -uo pipefail
+          drifted=()
+          errored=()
+          for stack in network gke data platform; do
+            echo "::group::plan ${stack}"
+            tofu -chdir="infra/envs/dev/${stack}" init -input=false >/dev/null
+            tofu -chdir="infra/envs/dev/${stack}" plan -input=false -no-color \
+              -lock=false -detailed-exitcode > "/tmp/drift-${stack}.txt" 2>&1
+            code=$?
+            tail -40 "/tmp/drift-${stack}.txt"
+            echo "::endgroup::"
+            case "${code}" in
+              0) ;;
+              2) drifted+=("${stack}") ;;
+              *) errored+=("${stack}") ;;
+            esac
+          done
+          echo "drifted=${drifted[*]:-}" >> "$GITHUB_OUTPUT"
+          echo "errored=${errored[*]:-}" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update the drift issue
+        if: steps.scan.outputs.drifted != '' || steps.scan.outputs.errored != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          DRIFTED: ${{ steps.scan.outputs.drifted }}
+          ERRORED: ${{ steps.scan.outputs.errored }}
+        with:
+          script: |
+            const marker = '<!-- tofu-drift -->';
+            const title = 'Drift detected between OpenTofu state and GCP';
+            const body = [
+              marker,
+              `### Drift check — ${new Date().toISOString().slice(0, 10)}`,
+              '',
+              process.env.DRIFTED ? `**Stacks with drift:** ${process.env.DRIFTED}` : '',
+              process.env.ERRORED ? `**Stacks that errored:** ${process.env.ERRORED}` : '',
+              '',
+              'Run the workflow logs for the full plans. Reconcile by PR:',
+              'either `tofu import`/code the console change, or apply to revert it.',
+              'Console-created resources are a bug, not a shortcut.',
+            ].filter(Boolean).join('\n');
+
+            const { owner, repo } = context.repo;
+            const open = await github.rest.issues.listForRepo({
+              owner, repo, state: 'open', labels: 'drift',
+            });
+            const existing = open.data.find((i) => i.body && i.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.update({ owner, repo, issue_number: existing.number, body });
+            } else {
+              await github.rest.issues.create({ owner, repo, title, body, labels: ['drift'] });
+            }
+
+      - name: Fail the run on drift
+        if: steps.scan.outputs.drifted != '' || steps.scan.outputs.errored != ''
+        run: exit 1

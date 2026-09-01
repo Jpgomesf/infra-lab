@@ -146,6 +146,20 @@ keeps the digests current and groups the bumps into one PR.
 | `tofu-plan.yml` | PR touching `infra/**` | `validate` (`tofu init -backend=false` + `tofu validate` over twelve `{env, stack}` pairs — dev ×4, prod ×4, aws-dev ×4 — as an explicit `include:` list, because the cluster stack is `gke` in the GCP envs and `eks` in the AWS one, so a cross product would ask for stacks that do not exist), `trivy-config` (misconfiguration scan of `infra/`, fails on HIGH/CRITICAL), and `plan` (matrix, cloud-touching — see the guard below), which posts one PR comment per stack and updates it in place on re-runs. `plan`/`apply` stay dev-scoped. |
 | `tofu-apply.yml` | push to `main` touching `infra/**` | Single job in the `production` environment: `tofu init` + `tofu apply -auto-approve` over `network` → `gke` → `data` → `platform`, stopping at the first failure. The order is a hard dependency — `gke` and `data` read `network`'s outputs through `terraform_remote_state`. |
 | `zizmor.yml` | PR touching `.github/workflows/**` | zizmor at the default `regular` persona. Blocking: findings fail the check. |
+| `tofu-drift.yml` | Mondays 09:00 UTC + manual | Weekly `tofu plan -detailed-exitcode` over the armed stacks; any drift opens/updates a single `drift`-labeled issue and fails the run. Inert until the WIF variables are set. |
+
+`tofu-plan.yml` also runs **module contract tests** (`make test-modules`):
+`tofu test` with mocked providers — offline assertions that module invariants
+hold (see `infra/modules/object-store/gcs/tests/`). New modules should ship a
+`tests/` directory.
+
+### Console changes are a bug
+
+Nothing gets created or changed in the GCP console except the documented
+one-time layer-3 items (org, billing, payment). If an emergency ever forces a
+console change, `tofu import` it (or revert it) the same day — the weekly
+drift check is what catches violations, and the rebuild drill is what proves
+there are none.
 
 Least privilege throughout: every workflow declares `permissions: contents:
 read` at the top level, and only the jobs that authenticate to GCP elevate to
@@ -167,7 +181,7 @@ Variables):
 | Variable | Value |
 | --- | --- |
 | `WIF_PROVIDER` | Full provider resource name printed at the end of `bootstrap.sh`. Setting it arms `plan`/`apply`. |
-| `WIF_SERVICE_ACCOUNT` | Email of the service account CI impersonates. |
+| `WIF_SERVICE_ACCOUNT` | `tofu-ci@<project>.iam.gserviceaccount.com` — created by `bootstrap.sh` with a scoped role set (never `editor`/`owner`). Budgets additionally need `roles/billing.costsManager` on the billing account, a grant only a billing admin can make. |
 | `GCP_PROJECT_ID` | → `TF_VAR_project_id`. |
 | `GCP_PROJECT_NUMBER` | → `TF_VAR_project_number` (the `platform` stack's budget filter). |
 | `TF_STATE_BUCKET` | → `TF_VAR_state_bucket`, the bucket the `terraform_remote_state` lookups read. |

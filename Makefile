@@ -6,7 +6,7 @@ CLUSTER := lab
 # client-side last-applied annotation.
 ENVOY_GATEWAY := https://github.com/envoyproxy/gateway/releases/download/v1.9.1/install.yaml
 
-.PHONY: lab-up lab-down lab-status lab-apply fmt lint
+.PHONY: lab-up lab-down lab-status lab-apply fmt lint test-modules
 
 lab-up:
 	kind create cluster --config kind.yaml
@@ -34,3 +34,10 @@ lint:
 	kubectl kustomize k8s/base > /dev/null
 	kubectl kustomize k8s/overlays/local > /dev/null
 	@echo "lint OK"
+
+# Module contract tests: mocked provider, no cloud, no credentials.
+test-modules:
+	@for d in $$(find infra/modules -type d -name tests | sed 's|/tests$$||' | sort -u); do \
+		echo "== $$d"; \
+		(cd $$d && tofu init -backend=false -input=false > /dev/null && tofu test) || exit 1; \
+	done
