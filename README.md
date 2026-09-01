@@ -86,6 +86,22 @@ Gateway's `envoyService` has no `ports` field.
    (`tofu init && tofu apply` in each; CI takes over after the first apply).
 5. Fill in `k8s/overlays/dev` (see its README).
 
+## Phase 2 — GCP prod
+
+`infra/envs/prod` mirrors dev in a **separate GCP project** (quota, IAM, and
+blast-radius isolation — Google's own recommended pattern) with prod knobs:
+an on-demand node floor, an SLA-eligible Cloud SQL tier with backups + PITR,
+bucket versioning, distinct CIDRs, a bigger budget. Run `bootstrap.sh` against
+the prod project, replace the state-bucket placeholder in
+`infra/envs/prod/*/main.tf`, apply stacks in the same order, then fill in
+`k8s/overlays/prod` (see its README). Deploys arrive via the promotion PR —
+merging it is the prod deploy. Upgrade triggers are documented in place:
+regional control plane and Cloud SQL HA when uptime = revenue.
+
+The dev database is deliberately disposable — no backups, no deletion
+protection, rebuilt from migrations + idempotent seeds — and stoppable while
+idle (`db_activation_policy = "NEVER"`), which halts compute billing.
+
 ## CI
 
 Four workflows in `.github/workflows`. All third-party actions are pinned to a
@@ -138,8 +154,8 @@ before any variable is.
 ### Accepted scan findings
 
 `.trivyignore.yaml` holds the accepted `trivy config` findings, each with a
-written rationale (GKE legacy metadata endpoints, master authorized networks,
-Cloud SQL TLS enforcement). It is an accepted-risk register, not a mute button:
+written rationale (GKE legacy metadata endpoints, master authorized networks).
+It is an accepted-risk register, not a mute button:
 anything not listed there still fails the PR at HIGH/CRITICAL.
 
 ### Checklist for when the repo is pushed
@@ -149,9 +165,9 @@ anything not listed there still fails the PR at HIGH/CRITICAL.
    pauses for approval.
 2. **Ruleset.** Settings → Rules → Rulesets → new branch ruleset targeting
    `main`: require a pull request before merging; require status checks
-   `make lint`, `validate (network)`, `validate (gke)`, `validate (data)`,
-   `validate (platform)`, and `trivy config scan`; block force pushes; block
-   deletions.
+   `make lint`, `validate (dev/…)` and `validate (prod/…)` for each of the
+   four stacks, and `trivy config scan`; block force pushes; block deletions.
+   (Confirm exact check names against the first PR's check list.)
 3. **Renovate.** Install the Renovate GitHub App on the repo; it picks up
    `renovate.json` and opens the onboarding PR.
 4. **Bootstrap, then arm CI.** Run `infra/scripts/bootstrap.sh`, then set the

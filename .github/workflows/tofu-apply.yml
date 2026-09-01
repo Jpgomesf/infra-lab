@@ -3,6 +3,10 @@ name: tofu-apply
 # Applies infra/envs/dev on merge to main. Guarded twice: the `production`
 # environment (required reviewer) and the WIF_PROVIDER repo variable, so the
 # workflow is inert until the GCP project is bootstrapped.
+#
+# envs/prod is validated in CI but NOT applied here yet — arming it means a
+# second job with the prod project's WIF provider/variables and its own
+# environment gate, added when the prod project is bootstrapped.
 
 on:
   push:

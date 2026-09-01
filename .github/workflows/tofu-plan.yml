@@ -27,11 +27,12 @@ env:
 
 jobs:
   validate:
-    name: validate (${{ matrix.stack }})
+    name: validate (${{ matrix.env }}/${{ matrix.stack }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
+        env: [dev, prod]
         stack: [network, gke, data, platform]
     steps:
       - name: Checkout
@@ -48,11 +49,11 @@ jobs:
       # -backend=false skips the GCS backend entirely: no bucket, no
       # credentials, no state. Providers and modules are still resolved.
       - name: tofu init
-        working-directory: infra/envs/dev/${{ matrix.stack }}
+        working-directory: infra/envs/${{ matrix.env }}/${{ matrix.stack }}
         run: tofu init -backend=false -input=false
 
       - name: tofu validate
-        working-directory: infra/envs/dev/${{ matrix.stack }}
+        working-directory: infra/envs/${{ matrix.env }}/${{ matrix.stack }}
         run: tofu validate -no-color
 
   trivy-config:
@@ -81,6 +82,9 @@ jobs:
     needs: [validate]
     # Pre-bootstrap guard: no WIF provider configured means no GCP project to
     # plan against, so the job is skipped rather than failed.
+    # NOTE: plan/apply target envs/dev only until the prod project exists —
+    # arming prod means a second WIF provider + project variables and a prod
+    # dimension here, mirroring the validate matrix.
     if: vars.WIF_PROVIDER != ''
     runs-on: ubuntu-latest
     permissions:

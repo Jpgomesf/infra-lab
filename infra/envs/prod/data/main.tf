@@ -3,7 +3,7 @@ terraform {
 
   backend "gcs" {
     bucket = "REPLACE-tofu-state-bucket"
-    prefix = "dev/data"
+    prefix = "prod/data"
   }
 
   required_providers {
@@ -19,7 +19,7 @@ provider "google" {
   region  = var.region
 
   default_labels = {
-    env        = "dev"
+    env        = "prod"
     managed-by = "opentofu"
   }
 }
@@ -29,30 +29,28 @@ data "terraform_remote_state" "network" {
 
   config = {
     bucket = var.state_bucket
-    prefix = "dev/network"
+    prefix = "prod/network"
   }
 }
 
 module "postgres" {
   source = "../../../modules/database/cloudsql"
 
-  name       = "lab-dev"
+  name       = "lab-prod"
   project_id = var.project_id
   region     = var.region
   network_id = data.terraform_remote_state.network.outputs.network_id
-  tier       = "db-f1-micro"
 
-  # The dev DB is disposable: rebuilt from migrations + idempotent seeds, so
-  # no backups/PITR, no deletion protection, and stoppable when idle
-  # (db_activation_policy = "NEVER" halts compute billing, keeps storage).
-  backups_enabled     = false
-  deletion_protection = false
-  activation_policy   = var.db_activation_policy
+  # Smallest SLA-eligible prod shape (~$114/mo). Backups + PITR stay on
+  # (module defaults). Flip availability_type to REGIONAL (~2x) when
+  # uptime = revenue.
+  tier              = "db-custom-2-8192"
+  disk_size_gb      = 50
+  availability_type = "ZONAL"
 
   db_password = var.db_password
 }
 
-# Cloud identity for the API workload; the KSA side lives in k8s/base.
 module "api_identity" {
   source = "../../../modules/iam/gke-workload-identity"
 
@@ -69,5 +67,6 @@ module "app_bucket" {
   name                       = "${var.project_id}-app"
   project_id                 = var.project_id
   location                   = upper(var.region)
+  versioning                 = true
   hmac_service_account_email = module.api_identity.identity
 }

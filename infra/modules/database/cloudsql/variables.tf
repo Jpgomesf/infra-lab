@@ -47,6 +47,12 @@ variable "transaction_log_retention_days" {
   default     = 7
 }
 
+variable "activation_policy" {
+  description = "ALWAYS runs the instance; NEVER stops it (compute unbilled, storage kept) — the dev cost lever."
+  type        = string
+  default     = "ALWAYS"
+}
+
 variable "deletion_protection" {
   type    = bool
   default = true

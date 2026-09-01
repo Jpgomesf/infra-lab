@@ -16,9 +16,3 @@ variable "db_password" {
   type      = string
   sensitive = true
 }
-
-variable "db_activation_policy" {
-  description = "Flip to NEVER to stop the dev instance while idle."
-  type        = string
-  default     = "ALWAYS"
-}
