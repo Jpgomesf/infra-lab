@@ -15,7 +15,7 @@ variable "billing_account_id" {
   type = string
 }
 
-variable "monthly_budget_usd" {
+variable "monthly_budget" {
   type    = number
   default = 300
 }

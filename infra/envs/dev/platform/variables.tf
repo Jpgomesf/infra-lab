@@ -15,13 +15,14 @@ variable "billing_account_id" {
   type = string
 }
 
-variable "monthly_budget_usd" {
-  type    = number
-  default = 100
+variable "monthly_budget" {
+  description = "Units of the billing account's own currency (no currency is hardcoded)."
+  type        = number
+  default     = 100
 }
 
-variable "account_monthly_budget_usd" {
-  description = "Backstop across the whole billing account, all projects."
+variable "account_monthly_budget" {
+  description = "Backstop across the whole billing account, all projects. Same currency rule."
   type        = number
   default     = 150
 }
