@@ -13,7 +13,11 @@ cloud migration must not spill out of layer 1**:
    (`cluster`, `network`, `database`, `object-store`, `iam`), each with a
    `CONTRACT.md`. Environments compose implementations and may depend only on
    contract inputs/outputs. Migrating to AWS = writing `eks/`, `aws-vpc/`,
-   `rds/`, `s3/` against the same contracts + a new env dir. Nothing else moves.
+   `rds/`, `s3/` against the same contracts + a new env dir. Nothing else moves
+   — and that is no longer a claim: those four modules, plus
+   `iam/eks-pod-identity`, exist and are composed by `infra/envs/aws-dev`, with
+   every place the mapping did *not* hold written down in the module's README
+   instead of smoothed over (see [AWS lab](#aws-lab)).
 2. **`k8s/` — the portable layer.** Plain Kubernetes manifests
    (base + kustomize overlays): Deployments, Services, KSAs, NetworkPolicies,
    Gateway API HTTPRoutes. Runs verbatim on kind, GKE, or EKS.
@@ -102,6 +106,34 @@ The dev database is deliberately disposable — no backups, no deletion
 protection, rebuilt from migrations + idempotent seeds — and stoppable while
 idle (`db_activation_policy = "NEVER"`), which halts compute billing.
 
+## AWS lab
+
+`infra/envs/aws-dev` is the falsification test for the layering rule above: the
+same five capabilities, the same variable names, the same contract outputs, on
+EKS / VPC / RDS / S3 / Pod Identity — and `k8s/` untouched. Two optional
+capabilities live only on this side so far, `queue/sqs` and `events/eventbridge`
+(the app's default queue stays inside Postgres; those are the managed analogs
+for when that is outgrown).
+
+Three things are worth knowing before running it, all covered in
+**[`infra/envs/aws-dev/README.md`](infra/envs/aws-dev/README.md)**:
+
+- **Cost.** ~$106/mo before a single pod runs, ~$128/mo with a node and the
+  database. The EKS control plane is $0.10/hr with **no**
+  free-tier credit, where GKE's identical list price is covered by a $74.40/mo
+  zonal credit; a NAT gateway adds ~$33/mo where Cloud NAT costs ~$2. There is
+  no RDS equivalent of Cloud SQL's `activation_policy = "NEVER"`, so the env is
+  designed for apply-then-destroy sessions rather than idling.
+- **State stays on GCS**, in the same bucket, under `aws-dev/<stack>`. One
+  backend regardless of target cloud — which means `plan`/`apply` need both
+  Google and AWS credentials, while `validate` needs neither.
+- **The contract deviations are documented, not hidden.** EKS has no secondary
+  ranges (`pods_range_name` is `null`), the singular `subnet_id` stays singular
+  while EKS reads a `private_subnet_ids` extra, RDS has no private IP so
+  `private_ip` carries the DNS name, S3 returns `null` for the key pair because
+  Pod Identity makes static keys unnecessary, and the `iam` capability's `roles`
+  list carries policy ARNs instead of role names.
+
 ## CI
 
 Four workflows in `.github/workflows`. All third-party actions are pinned to a
@@ -111,7 +143,7 @@ keeps the digests current and groups the bumps into one PR.
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `lint.yml` | PR, push to `main` | `make lint` on OpenTofu 1.12.3. `kubectl` is preinstalled on the `ubuntu-latest` runner image, so nothing installs it; a `kubectl version --client` step asserts that assumption instead of letting a runner-image change fail inside the Makefile. |
-| `tofu-plan.yml` | PR touching `infra/**` | `validate` (matrix over the four stacks: `tofu init -backend=false` + `tofu validate`), `trivy-config` (misconfiguration scan of `infra/`, fails on HIGH/CRITICAL), and `plan` (matrix, cloud-touching — see the guard below), which posts one PR comment per stack and updates it in place on re-runs. |
+| `tofu-plan.yml` | PR touching `infra/**` | `validate` (`tofu init -backend=false` + `tofu validate` over twelve `{env, stack}` pairs — dev ×4, prod ×4, aws-dev ×4 — as an explicit `include:` list, because the cluster stack is `gke` in the GCP envs and `eks` in the AWS one, so a cross product would ask for stacks that do not exist), `trivy-config` (misconfiguration scan of `infra/`, fails on HIGH/CRITICAL), and `plan` (matrix, cloud-touching — see the guard below), which posts one PR comment per stack and updates it in place on re-runs. `plan`/`apply` stay dev-scoped. |
 | `tofu-apply.yml` | push to `main` touching `infra/**` | Single job in the `production` environment: `tofu init` + `tofu apply -auto-approve` over `network` → `gke` → `data` → `platform`, stopping at the first failure. The order is a hard dependency — `gke` and `data` read `network`'s outputs through `terraform_remote_state`. |
 | `zizmor.yml` | PR touching `.github/workflows/**` | zizmor at the default `regular` persona. Blocking: findings fail the check. |
 
@@ -154,7 +186,9 @@ before any variable is.
 ### Accepted scan findings
 
 `.trivyignore.yaml` holds the accepted `trivy config` findings, each with a
-written rationale (GKE legacy metadata endpoints, master authorized networks).
+written rationale (GKE legacy metadata endpoints, master authorized networks,
+and the EKS public control-plane endpoint — the AWS twin of the second one,
+accepted for the same reason and to be retired alongside it).
 It is an accepted-risk register, not a mute button:
 anything not listed there still fails the PR at HIGH/CRITICAL.
 
@@ -165,8 +199,9 @@ anything not listed there still fails the PR at HIGH/CRITICAL.
    pauses for approval.
 2. **Ruleset.** Settings → Rules → Rulesets → new branch ruleset targeting
    `main`: require a pull request before merging; require status checks
-   `make lint`, `validate (dev/…)` and `validate (prod/…)` for each of the
-   four stacks, and `trivy config scan`; block force pushes; block deletions.
+   `make lint`, `validate (dev/…)`, `validate (prod/…)` and
+   `validate (aws-dev/…)` for each of their four stacks, and
+   `trivy config scan`; block force pushes; block deletions.
    (Confirm exact check names against the first PR's check list.)
 3. **Renovate.** Install the Renovate GitHub App on the repo; it picks up
    `renovate.json` and opens the onboarding PR.

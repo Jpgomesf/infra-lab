@@ -31,9 +31,23 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      # An explicit include list rather than a cross product: the stack names
+      # are not the same in every env (gke vs eks), so env x stack would ask for
+      # dev/eks and aws-dev/gke, neither of which exists.
       matrix:
-        env: [dev, prod]
-        stack: [network, gke, data, platform]
+        include:
+          - { env: dev, stack: network }
+          - { env: dev, stack: gke }
+          - { env: dev, stack: data }
+          - { env: dev, stack: platform }
+          - { env: prod, stack: network }
+          - { env: prod, stack: gke }
+          - { env: prod, stack: data }
+          - { env: prod, stack: platform }
+          - { env: aws-dev, stack: network }
+          - { env: aws-dev, stack: eks }
+          - { env: aws-dev, stack: data }
+          - { env: aws-dev, stack: platform }
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,6 +99,9 @@ jobs:
     # NOTE: plan/apply target envs/dev only until the prod project exists —
     # arming prod means a second WIF provider + project variables and a prod
     # dimension here, mirroring the validate matrix.
+    # NOTE: arming aws-dev additionally needs aws-actions/configure-aws-credentials
+    # (GitHub OIDC role in the AWS account) guarded by an AWS_ROLE_ARN variable,
+    # alongside the google auth step — the GCS backend needs both. Later.
     if: vars.WIF_PROVIDER != ''
     runs-on: ubuntu-latest
     permissions:
