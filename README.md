@@ -16,7 +16,7 @@ cloud migration must not spill out of layer 1**:
    `rds/`, `s3/` against the same contracts + a new env dir. Nothing else moves.
 2. **`k8s/` — the portable layer.** Plain Kubernetes manifests
    (base + kustomize overlays): Deployments, Services, KSAs, NetworkPolicies,
-   ingress-nginx routing. Runs verbatim on kind, GKE, or EKS.
+   Gateway API HTTPRoutes. Runs verbatim on kind, GKE, or EKS.
 3. **Console, once.** Org, billing account, payment method, startup-credits
    application. Prerequisites to `tofu apply`; never code.
 
@@ -29,7 +29,7 @@ for all telemetry, and the job queue rides inside Postgres.
 Requires: Docker running, `kind`, `kubectl` (`brew install kind kubectl`).
 
 ```sh
-make lab-up       # kind cluster + ingress-nginx + the full stack
+make lab-up       # kind cluster + Envoy Gateway + the full stack
 make lab-status
 make lab-down     # tear down when done working
 ```
@@ -42,6 +42,40 @@ Endpoints (after `lab-up`): [api.localtest.me](http://api.localtest.me) ·
 The `api` and `mcp-server` Deployments run a stand-in image
 (`traefik/whoami`); swap them via the overlay `images:` block once the real
 services have images.
+
+### Routing: Gateway API, not Ingress
+
+SIG Network announced ingress-nginx's retirement on **2025-11-11**; maintenance
+was best-effort until March 2026 and the repository was **archived on
+2026-03-24** — no more releases, bugfixes, or CVE fixes. Its own README now
+tells new users to pick a Gateway API implementation instead. So the lab routes
+through **Gateway API**, with **Envoy Gateway** (a CNCF Envoy subproject) as the
+in-cluster implementation, pinned in the `Makefile` to `v1.9.1`. That one
+install manifest also carries the Gateway API `v1.6.1` CRDs, so there is no
+separate CRD install step.
+
+The split follows the layering rule above:
+
+| Where | What | Why |
+| --- | --- | --- |
+| `k8s/base/httproutes.yaml` | one `HTTPRoute` per exposed service | portable — every environment routes the same way, only `spec.hostnames` changes |
+| `k8s/overlays/local/gateway.yaml` | `GatewayClass` + `Gateway` + `EnvoyProxy` | implementation- and cluster-specific |
+
+The routes attach to a `Gateway` named `lab` in the `app` namespace, so a cloud
+overlay only has to supply its own `Gateway` under that name. Everything sits in
+one namespace, which keeps `parentRefs` simple and needs no `ReferenceGrant`.
+
+Reaching it from macOS: `*.localtest.me` resolves to `127.0.0.1`, the
+`EnvoyProxy` resource pins the Envoy Service to `NodePort` **30080**, and
+`kind.yaml` publishes host port 80 to it. Two details matter and are easy to get
+wrong — `externalTrafficPolicy` must be `Cluster` (it defaults to `Local`, which
+would drop traffic arriving at the control-plane node while Envoy runs on the
+worker), and the nodePort number has to come from a `patch`, because Envoy
+Gateway's `envoyService` has no `ports` field.
+
+> The manifests are schema-validated against the pinned v1.9.1 CRDs, but the
+> runtime path is **unverified** until the next `make lab-up` — it was written
+> with the Docker daemon deliberately down.
 
 ## Phase 1 — GCP dev
 

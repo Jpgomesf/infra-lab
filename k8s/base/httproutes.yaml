@@ -1,0 +1,61 @@
+# Portable K8s API (Gateway API v1, standard channel). These attach to a
+# Gateway named `lab` in this namespace; each overlay supplies that Gateway plus
+# its implementation-specific GatewayClass. Cloud overlays patch `spec.hostnames`
+# to the real domain — everything else here is unchanged across environments.
+#
+# Note: Gateway API backendRefs take a numeric service port, not a port name.
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: api
+spec:
+  parentRefs:
+    - name: lab
+  hostnames:
+    - api.localtest.me
+  rules:
+    - backendRefs:
+        - name: api
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: mcp-server
+spec:
+  parentRefs:
+    - name: lab
+  hostnames:
+    - mcp.localtest.me
+  rules:
+    - backendRefs:
+        - name: mcp-server
+          port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana
+spec:
+  parentRefs:
+    - name: lab
+  hostnames:
+    - grafana.localtest.me
+  rules:
+    - backendRefs:
+        - name: otel-lgtm
+          port: 3000
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: minio
+spec:
+  parentRefs:
+    - name: lab
+  hostnames:
+    - minio.localtest.me
+  rules:
+    - backendRefs:
+        - name: minio
+          port: 9001

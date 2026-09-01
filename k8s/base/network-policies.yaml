@@ -19,10 +19,14 @@ spec:
     - from:
         - podSelector: {}
 ---
+# Envoy Gateway runs its data plane in `envoy-gateway-system` by default, so the
+# Gateway reaches these pods across namespaces. (`kubernetes.io/metadata.name` is
+# set automatically by the apiserver on every namespace.) If the data plane is
+# ever moved into this namespace, `allow-same-namespace` above already covers it.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
-  name: allow-ingress-controller
+  name: allow-gateway-dataplane
 spec:
   podSelector:
     matchExpressions:
@@ -33,4 +37,4 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
+              kubernetes.io/metadata.name: envoy-gateway-system

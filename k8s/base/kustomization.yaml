@@ -6,6 +6,7 @@ namespace: app
 resources:
   - namespace.yaml
   - network-policies.yaml
+  - httproutes.yaml
   - api/serviceaccount.yaml
   - api/deployment.yaml
   - api/service.yaml

@@ -7,7 +7,7 @@ to manage locally.
 From the repo root:
 
 ```sh
-make lab-up      # create kind cluster + ingress-nginx + apply k8s/overlays/local
+make lab-up      # create kind cluster + Envoy Gateway + apply k8s/overlays/local
 make lab-status
 make lab-down    # delete the cluster (fits the tear-down-when-idle habit)
 ```

@@ -1,0 +1,64 @@
+# Local routing entrypoint. The portable HTTPRoutes live in k8s/base; this file
+# holds only what is specific to this cluster and to Envoy Gateway v1.9.1.
+#
+# *.localtest.me resolves to 127.0.0.1. kind maps host port 80 to the Envoy
+# service's fixed NodePort 30080 (see kind.yaml), so the whole path is
+# host:80 -> node:30080 -> envoy -> HTTPRoute -> Service.
+apiVersion: gateway.networking.k8s.io/v1
+kind: GatewayClass
+metadata:
+  name: eg
+spec:
+  controllerName: gateway.envoyproxy.io/gatewayclass-controller
+  # GatewayClass is cluster-scoped; the EnvoyProxy it points at is namespaced,
+  # so parametersRef.namespace is required (Envoy Gateway defaults it to
+  # "default", not to the Gateway's namespace) and must track the EnvoyProxy
+  # below by hand — no kustomize transformer rewrites this field.
+  parametersRef:
+    group: gateway.envoyproxy.io
+    kind: EnvoyProxy
+    name: envoy-lab
+    namespace: app
+---
+# Pins the Envoy data plane to a NodePort kind can map. KubernetesServiceSpec
+# has no `ports` field, so the nodePort numbers have to come from a patch; the
+# merge key for ServiceSpec.ports is `port`, so this updates the generated
+# port 80 entry in place rather than appending a second one.
+#
+# externalTrafficPolicy MUST be Cluster here: it defaults to Local, and kind
+# forwards host traffic through the control-plane node while Envoy schedules on
+# a worker — Local would drop every request at the node with no local endpoint.
+apiVersion: gateway.envoyproxy.io/v1alpha1
+kind: EnvoyProxy
+metadata:
+  name: envoy-lab
+  namespace: app
+spec:
+  provider:
+    type: Kubernetes
+    kubernetes:
+      envoyService:
+        type: NodePort
+        externalTrafficPolicy: Cluster
+        patch:
+          type: StrategicMerge
+          value:
+            spec:
+              ports:
+                - port: 80
+                  nodePort: 30080
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: lab
+  namespace: app
+spec:
+  gatewayClassName: eg
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes:
+        namespaces:
+          from: Same

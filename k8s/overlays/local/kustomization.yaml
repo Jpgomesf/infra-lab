@@ -1,11 +1,15 @@
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 
-namespace: app
+# Deliberately no top-level `namespace:` — the base already places its own
+# resources in `app`, and a namespace transformer here would also stamp
+# `metadata.namespace` onto the cluster-scoped GatewayClass (kustomize only
+# knows the scope of built-in kinds, not of CRDs). Everything this overlay adds
+# therefore declares its namespace explicitly instead.
 
 resources:
   - ../../base
-  - ingress.yaml
+  - gateway.yaml
 
 generatorOptions:
   disableNameSuffixHash: true
@@ -14,12 +18,14 @@ generatorOptions:
 # Secret Manager via External Secrets Operator instead.
 secretGenerator:
   - name: postgres-credentials
+    namespace: app
     literals:
       - POSTGRES_USER=app
       - POSTGRES_PASSWORD=localdev
       - POSTGRES_DB=app
       - url=postgres://app:localdev@postgres:5432/app
   - name: minio-credentials
+    namespace: app
     literals:
       - MINIO_ROOT_USER=minioadmin
       - MINIO_ROOT_PASSWORD=minioadmin-local

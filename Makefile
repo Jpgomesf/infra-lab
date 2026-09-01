@@ -1,14 +1,20 @@
-CLUSTER        := lab
-INGRESS_NGINX  := https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.12.1/deploy/static/provider/kind/deploy.yaml
+CLUSTER := lab
+
+# Envoy Gateway v1.9.1 (released 2026-08-28). This single manifest also bundles
+# the Gateway API v1.6.1 CRDs, so there is no separate CRD install step.
+# Server-side apply is required: the CRD schemas are far too large for the
+# client-side last-applied annotation.
+ENVOY_GATEWAY := https://github.com/envoyproxy/gateway/releases/download/v1.9.1/install.yaml
 
 .PHONY: lab-up lab-down lab-status lab-apply fmt lint
 
 lab-up:
 	kind create cluster --config kind.yaml
-	kubectl apply -f $(INGRESS_NGINX)
-	kubectl -n ingress-nginx wait --for=condition=Ready pod \
-		-l app.kubernetes.io/component=controller --timeout=180s
+	kubectl apply --server-side -f $(ENVOY_GATEWAY)
+	kubectl -n envoy-gateway-system wait --for=condition=Available \
+		deployment/envoy-gateway --timeout=300s
 	kubectl apply -k k8s/overlays/local
+	kubectl -n app wait --for=condition=Programmed gateway/lab --timeout=180s
 	@echo "lab up: http://api.localtest.me  http://mcp.localtest.me  http://grafana.localtest.me  http://minio.localtest.me"
 
 lab-apply:
