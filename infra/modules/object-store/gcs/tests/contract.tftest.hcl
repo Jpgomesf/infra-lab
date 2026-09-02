@@ -17,6 +17,11 @@ run "invariants_hold_by_default" {
   }
 
   assert {
+    condition     = google_storage_bucket.this.public_access_prevention == "enforced"
+    error_message = "public access prevention is a contract invariant, never optional"
+  }
+
+  assert {
     condition     = google_storage_bucket.this.force_destroy == false
     error_message = "buckets must not default to force_destroy"
   }
@@ -38,6 +43,36 @@ run "hmac_key_follows_service_account" {
     condition     = length(google_storage_hmac_key.s3_interop) == 1
     error_message = "passing a service account must mint exactly one HMAC key"
   }
+}
+
+run "retention_renders_for_backup_buckets" {
+  command = plan
+
+  variables {
+    retention_period_seconds = 2592000
+  }
+
+  assert {
+    # The provider types retention_period as a string.
+    condition     = google_storage_bucket.this.retention_policy[0].retention_period == "2592000"
+    error_message = "retention_period_seconds must render a retention policy"
+  }
+
+  assert {
+    condition     = google_storage_bucket.this.retention_policy[0].is_locked == false
+    error_message = "the lock must never be implicit — retention_locked is opt-in"
+  }
+}
+
+run "versioning_and_retention_are_mutually_exclusive" {
+  command = plan
+
+  variables {
+    versioning               = true
+    retention_period_seconds = 2592000
+  }
+
+  expect_failures = [google_storage_bucket.this]
 }
 
 run "soft_delete_can_be_disabled_for_churny_buckets" {

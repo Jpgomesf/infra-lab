@@ -47,6 +47,12 @@ variable "transaction_log_retention_days" {
   default     = 7
 }
 
+variable "retained_backups" {
+  description = "Rolling count of automated backups kept. Instance-attached backups die with the instance — off-instance exports to a locked bucket are the real DR layer (prod-launch item)."
+  type        = number
+  default     = 14
+}
+
 variable "activation_policy" {
   description = "ALWAYS runs the instance; NEVER stops it (compute unbilled, storage kept) — the dev cost lever."
   type        = string

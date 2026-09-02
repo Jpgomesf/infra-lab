@@ -24,6 +24,10 @@ SDK + endpoint + key pair), so swapping implementations is a config change.
 ## Invariants
 
 - Consumers never import a provider-native storage client — S3 SDK only.
+- Public access prevention is always enforced; it is not a variable.
+- Protection is chosen by bucket ROLE, never combined: mutable app data gets
+  versioning (+ soft delete); immutable backup buckets get a retention policy
+  (WORM), optionally locked irreversibly. The module enforces the exclusivity.
 - Known GCS-interop gaps (multipart 1024-part cap, no object tagging, SDK
   checksum env vars) are documented in the blueprint; keep usage inside the
   common subset.

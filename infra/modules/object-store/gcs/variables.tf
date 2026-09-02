@@ -27,6 +27,18 @@ variable "hmac_service_account_email" {
   default = null
 }
 
+variable "retention_period_seconds" {
+  description = "WORM window for backup-role buckets. Mutually exclusive with versioning."
+  type        = number
+  default     = null
+}
+
+variable "retention_locked" {
+  description = "Locks the retention policy irreversibly (Bucket Lock). One-way door — only for real backup buckets."
+  type        = bool
+  default     = false
+}
+
 variable "soft_delete_retention_seconds" {
   description = "null = GCP default (7 days). 0 disables soft delete for churny buckets."
   type        = number

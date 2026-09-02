@@ -30,5 +30,10 @@ replication, never a code change.
 
 - No public IP. Reachable only from the private network.
 - Backups + PITR on wherever the environment is not throwaway.
+- `deletion_protection = true` engages BOTH layers: the IaC-side destroy guard
+  and the server-side API refusal (console deletion included).
+- Instance-attached backups die with the instance on every provider — the
+  durable DR layer is off-instance exports to a locked bucket in a separate
+  project (prod-launch item), never the instance's own backups.
 - The job queue lives in this database (extension-free implementation), so it
   inherits this contract's portability.

@@ -10,9 +10,14 @@ resource "google_sql_database_instance" "this" {
     edition           = "ENTERPRISE"
     availability_type = var.availability_type
     activation_policy = var.activation_policy
-    disk_size         = var.disk_size_gb
-    disk_type         = "PD_SSD"
-    disk_autoresize   = true
+
+    # Server-side twin of the provider-level deletion_protection above: that
+    # one only stops `tofu destroy`; this one makes the API itself refuse
+    # deletion from any path, console included.
+    deletion_protection_enabled = var.deletion_protection
+    disk_size                   = var.disk_size_gb
+    disk_type                   = "PD_SSD"
+    disk_autoresize             = true
 
     ip_configuration {
       ipv4_enabled    = false
@@ -25,6 +30,14 @@ resource "google_sql_database_instance" "this" {
       point_in_time_recovery_enabled = var.backups_enabled
       # PITR window; billed as instance disk, separate from backup retention.
       transaction_log_retention_days = var.backups_enabled ? var.transaction_log_retention_days : null
+
+      dynamic "backup_retention_settings" {
+        for_each = var.backups_enabled ? [1] : []
+        content {
+          retained_backups = var.retained_backups
+          retention_unit   = "COUNT"
+        }
+      }
     }
   }
 }

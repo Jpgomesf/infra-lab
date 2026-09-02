@@ -64,9 +64,16 @@ module "api_identity" {
 module "app_bucket" {
   source = "../../../modules/object-store/gcs"
 
-  name                       = "${var.project_id}-app"
-  project_id                 = var.project_id
-  location                   = upper(var.region)
-  versioning                 = true
-  hmac_service_account_email = module.api_identity.identity
+  name       = "${var.project_id}-app"
+  project_id = var.project_id
+  location   = upper(var.region)
+  versioning = true
+  # 30-day undo window on top of versioning for real data.
+  soft_delete_retention_seconds = 2592000
+  hmac_service_account_email    = module.api_identity.identity
 }
+
+# Prod-launch DR item (own stack when prod goes live): nightly SQL exports to
+# a locked-retention bucket in a SEPARATE backups project, written by a
+# creator-only service account. Instance-attached backups die with the
+# instance; the export pipeline is the layer that survives everything.

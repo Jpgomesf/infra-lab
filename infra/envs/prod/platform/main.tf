@@ -29,6 +29,16 @@ provider "google" {
   }
 }
 
+# The one command that beats every other protection is `gcloud projects
+# delete`. A lien blocks it outright; removing the lien is a deliberate,
+# audited act of its own.
+resource "google_resource_manager_lien" "project" {
+  parent       = "projects/${var.project_number}"
+  restrictions = ["resourcemanager.projects.delete"]
+  origin       = "infra-platform"
+  reason       = "Production project - deletion blocked; remove this lien deliberately first."
+}
+
 resource "google_billing_budget" "monthly" {
   billing_account = var.billing_account_id
   display_name    = "lab-prod-monthly"
