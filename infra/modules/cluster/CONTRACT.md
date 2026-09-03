@@ -29,6 +29,21 @@ never on provider-specific extras an implementation happens to expose.
 ## Invariants
 
 - Nodes are private; egress goes through the network capability's NAT.
+- Nodes run under a dedicated, minimal identity — never the cloud default
+  (GKE: a required `node_service_account`; EKS: the module's own node role).
+  Pod identity protects the pod path; this protects the node path.
 - Pod identity is enabled: apps authenticate via their Kubernetes ServiceAccount,
   bound to a cloud identity by the `iam` capability. Apps never see cloud keys.
+- NetworkPolicy objects are enforced, not merely accepted (GKE: Dataplane V2,
+  a creation-time setting; EKS: documented deviation — needs the VPC CNI
+  network-policy agent).
+- Control-plane access is IAM-authenticated. GKE exposes no public IP endpoint:
+  `kubectl` reaches it through the DNS endpoint
+  (`gcloud container clusters get-credentials <name> --location <zone>
+  --dns-endpoint`), so there is no personal-IP allowlist to rotate. EKS keeps
+  a CIDR-restricted public endpoint (documented deviation, see
+  `.trivyignore.yaml`).
 - Managed metrics collection defaults OFF (no free tier); enable deliberately.
+
+Contract tests (`tofu test`, mocked provider) pin the creation-time invariants
+in `gke/tests/`; `make test-modules` runs them.

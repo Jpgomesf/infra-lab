@@ -60,6 +60,28 @@ data "terraform_remote_state" "network" {
   }
 }
 
+# Dedicated node identity. The default compute SA carries roles/editor; Workload
+# Identity protects the pod path only, so the node path gets its own minimal SA.
+resource "google_service_account" "nodes" {
+  project      = var.project_id
+  account_id   = "lab-prod-nodes"
+  display_name = "GKE nodes (prod)"
+}
+
+resource "google_project_iam_member" "nodes" {
+  for_each = toset([
+    "roles/logging.logWriter",
+    "roles/monitoring.metricWriter",
+    "roles/monitoring.viewer",
+    "roles/stackdriver.resourceMetadata.writer",
+    "roles/artifactregistry.reader",
+  ])
+
+  project = var.project_id
+  role    = each.value
+  member  = "serviceAccount:${google_service_account.nodes.email}"
+}
+
 module "cluster" {
   source = "../../../modules/cluster/gke"
 
@@ -72,7 +94,7 @@ module "cluster" {
   network    = data.terraform_remote_state.network.outputs.network_id
   subnetwork = data.terraform_remote_state.network.outputs.subnet_id
 
-  authorized_networks = var.authorized_networks
+  node_service_account = google_service_account.nodes.email
 
   spot_machine_type = "e2-medium"
   spot_min_nodes    = 1
