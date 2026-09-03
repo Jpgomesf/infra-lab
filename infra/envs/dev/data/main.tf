@@ -84,7 +84,7 @@ module "api_identity" {
   project_id = var.project_id
   namespace  = "app"
   ksa_name   = "api"
-  roles      = ["roles/storage.objectUser"]
+  # No project-level roles: object access is granted on the app bucket below.
 }
 
 # Same-region image pulls are free; the registry lives with the cluster.
@@ -102,4 +102,12 @@ module "app_bucket" {
   project_id                 = var.project_id
   location                   = upper(var.region)
   hmac_service_account_email = module.api_identity.identity
+}
+
+# Bucket-scoped, not project-scoped: a project-level objectUser would also
+# reach the state bucket and every future bucket in the project.
+resource "google_storage_bucket_iam_member" "api_objects" {
+  bucket = module.app_bucket.bucket
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${module.api_identity.identity}"
 }
