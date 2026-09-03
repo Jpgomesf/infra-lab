@@ -6,6 +6,33 @@ terraform {
     prefix = "prod/gke"
   }
 
+  # State encryption. The placeholder project is wired at prod bootstrap
+  # together with the state bucket; sensitive values (DB password, HMAC
+  # secret) would otherwise sit in plaintext in GCS.
+  encryption {
+    key_provider "gcp_kms" "state" {
+      kms_encryption_key = "projects/REPLACE-prod-project/locations/us-central1/keyRings/tofu/cryptoKeys/state"
+      key_length         = 32
+    }
+    method "aes_gcm" "state" {
+      keys = key_provider.gcp_kms.state
+    }
+    state {
+      method   = method.aes_gcm.state
+      enforced = true
+    }
+    plan {
+      method = method.aes_gcm.state
+    }
+    # terraform_remote_state reads need their own decryption config — the
+    # root state/plan blocks do not cover data sources.
+    remote_state_data_sources {
+      default {
+        method = method.aes_gcm.state
+      }
+    }
+  }
+
   required_providers {
     google = {
       source  = "hashicorp/google"
