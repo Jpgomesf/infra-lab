@@ -1,10 +1,15 @@
-# overlays/dev (stub — Phase 1)
+# overlays/dev
 
-When the GCP dev cluster exists, this overlay will:
+Live overlay for the GKE dev cluster (first applied 2026-09-01; the dev
+environment is torn down between sessions and rebuilt from the runbook). Today
+it pins the real `api` image digest from Artifact Registry, supplies the
+`Gateway` for Envoy Gateway on GKE, and deletes the local stand-ins the cloud
+replaces. Still open here, in order:
 
-- set `images:` to the Artifact Registry paths
+- move the image pin from the inline patch to an `images:` block, so the
+  release workflow's `kustomize edit set image` bump is not a silent no-op
 - annotate the `api`/`mcp-server` KSAs with `iam.gke.io/gcp-service-account`
-  (identities come from `infra/envs/dev/data`)
+  (identities come from `infra/envs/dev/data`) and drop the HMAC-key Secret
 - replace the in-cluster `postgres` and `minio` with `ExternalSecret`-fed
   `DATABASE_URL` / S3 credentials pointing at Cloud SQL and GCS-interop
 - replace `otel-lgtm` with an OTel collector Deployment exporting to
