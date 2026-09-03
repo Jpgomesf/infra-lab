@@ -150,7 +150,8 @@ jobs:
         uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
-          service_account: ${{ vars.WIF_SERVICE_ACCOUNT }}
+          # Read-only SA; falls back to the apply SA until the plan variable exists.
+          service_account: ${{ vars.WIF_PLAN_SERVICE_ACCOUNT || vars.WIF_SERVICE_ACCOUNT }}
 
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
@@ -163,13 +164,20 @@ jobs:
         run: tofu init -input=false
 
       # -lock=false: a plan only reads state, and PR plans should not queue
-      # behind each other or behind an apply.
+      # behind each other or behind an apply. The full plan stays in this log;
+      # the PR comment gets a resource-level summary only — this repo is
+      # public, and a full plan is a map of private IPs, CIDRs and endpoints.
       - name: tofu plan
         id: plan
         continue-on-error: true
         shell: bash
         working-directory: infra/envs/dev/${{ matrix.stack }}
-        run: tofu plan -input=false -no-color -lock=false 2>&1 | tee plan.txt
+        run: |
+          set -o pipefail
+          tofu plan -input=false -no-color -lock=false 2>&1 | tee plan.txt
+          rc=${PIPESTATUS[0]}
+          grep -E '^\s*# .* (will be|must be)|^Plan: |^No changes\.|^Error' plan.txt > summary.txt || true
+          exit "${rc}"
 
       - name: Comment plan on the PR
         if: always()
@@ -183,11 +191,11 @@ jobs:
             const stack = process.env.STACK;
             const outcome = process.env.PLAN_OUTCOME;
             const marker = `<!-- tofu-plan:${stack} -->`;
-            const file = `infra/envs/dev/${stack}/plan.txt`;
+            const file = `infra/envs/dev/${stack}/summary.txt`;
 
-            let plan = fs.existsSync(file)
+            let plan = fs.existsSync(file) && fs.readFileSync(file, 'utf8').trim()
               ? fs.readFileSync(file, 'utf8')
-              : '(no plan output was produced)';
+              : '(no resource changes — full output in the job log)';
 
             // GitHub caps a comment at 65536 characters; leave room for the
             // wrapper markup.
@@ -201,7 +209,7 @@ jobs:
               marker,
               `### tofu plan — \`${stack}\` (${status})`,
               '',
-              '<details><summary>show plan</summary>',
+              '<details><summary>show plan summary (full plan in the job log)</summary>',
               '',
               '```terraform',
               plan,

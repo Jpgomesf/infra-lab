@@ -1,12 +1,24 @@
 name: tofu-apply
 
-# Applies infra/envs/dev on merge to main. Guarded twice: the `production`
-# environment (required reviewer) and the WIF_PROVIDER repo variable, so the
-# workflow is inert until the GCP project is bootstrapped.
+# Applies infra/envs/dev on merge to main, in two jobs:
 #
-# envs/prod is validated in CI but NOT applied here yet — arming it means a
-# second job with the prod project's WIF provider/variables and its own
-# environment gate, added when the prod project is bootstrapped.
+#   plan   - read-only identity (WIF_PLAN_SERVICE_ACCOUNT). Writes one saved,
+#            encrypted plan per stack, uploads them as a short-lived artifact
+#            and prints a summary to the run page.
+#   apply  - `production` environment (required reviewer) + apply identity.
+#            Downloads the artifact and runs `tofu apply <saved plan>`: what
+#            the reviewer approved is exactly what gets applied. A fresh plan
+#            at apply time would not have that property.
+#
+# Guarded by the WIF_PROVIDER repo variable, so the workflow is inert until the
+# GCP project is bootstrapped. envs/prod is validated in CI but NOT applied
+# here yet — arming it means a second pair of jobs with the prod project's
+# WIF provider/variables and its own environment gate.
+#
+# Cross-stack edge: gke/data read network's outputs through terraform_remote_state
+# at *plan* time. A change that alters those outputs needs a second run (the
+# workflow_dispatch trigger) after the first apply, so downstream plans see the
+# new values. The weekly drift check catches anything that slips through.
 
 on:
   push:
@@ -14,6 +26,7 @@ on:
     paths:
       - infra/**
       - .github/workflows/tofu-apply.yml
+  workflow_dispatch: {}
 
 permissions:
   contents: read
@@ -24,11 +37,79 @@ concurrency:
   group: tofu-apply
   cancel-in-progress: false
 
+env:
+  TOFU_VERSION: 1.12.3
+
 jobs:
+  plan:
+    name: plan dev
+    # Pre-bootstrap guard: nothing to plan until WIF exists.
+    if: vars.WIF_PROVIDER != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write # OIDC token for Workload Identity Federation
+    env:
+      TF_VAR_project_id: ${{ vars.GCP_PROJECT_ID }}
+      TF_VAR_project_number: ${{ vars.GCP_PROJECT_NUMBER }}
+      TF_VAR_state_bucket: ${{ vars.TF_STATE_BUCKET }}
+      TF_VAR_billing_account_id: ${{ secrets.BILLING_ACCOUNT_ID }}
+      TF_VAR_db_password: ${{ secrets.DB_PASSWORD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Read-only SA; falls back to the apply SA only until the plan variable
+      # exists, so arming stays a one-variable change.
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.WIF_PLAN_SERVICE_ACCOUNT || vars.WIF_SERVICE_ACCOUNT }}
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
+        with:
+          tofu_version: ${{ env.TOFU_VERSION }}
+          tofu_wrapper: false
+
+      # -lock=false: a plan only reads state. The saved plan is encrypted by
+      # the stack's `encryption { plan {} }` block, so the artifact holds no
+      # plaintext secrets. Full plan text goes to the log; the run summary
+      # gets the resource-level digest the reviewer needs.
+      - name: Plan stacks in dependency order
+        shell: bash
+        run: |
+          set -euo pipefail
+          for stack in network gke data platform; do
+            dir="infra/envs/dev/${stack}"
+            echo "::group::plan ${stack}"
+            tofu -chdir="${dir}" init -input=false
+            tofu -chdir="${dir}" plan -input=false -no-color -lock=false -out=tfplan | tee "${dir}/plan.txt"
+            echo "::endgroup::"
+            {
+              echo "### ${stack}"
+              echo
+              echo '```'
+              grep -E '^\s*# .* (will be|must be)|^Plan: |^No changes\.' "${dir}/plan.txt" || echo "(no resource changes)"
+              echo '```'
+              echo
+            } >> "${GITHUB_STEP_SUMMARY}"
+          done
+
+      - name: Upload saved plans
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: tfplan-dev-${{ github.run_id }}
+          path: infra/envs/dev/*/tfplan
+          if-no-files-found: error
+          retention-days: 1
+
   apply:
     name: apply dev
-    # Pre-bootstrap guard: nothing to apply until WIF exists.
-    if: vars.WIF_PROVIDER != ''
+    needs: [plan]
     runs-on: ubuntu-latest
     environment: production
     permissions:
@@ -55,8 +136,16 @@ jobs:
       - name: Set up OpenTofu
         uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # v2.0.2
         with:
-          tofu_version: 1.12.3
+          tofu_version: ${{ env.TOFU_VERSION }}
           tofu_wrapper: false
+
+      # The upload's common ancestor is infra/envs/dev, so files come back as
+      # <stack>/tfplan under that path.
+      - name: Download saved plans
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: tfplan-dev-${{ github.run_id }}
+          path: infra/envs/dev
 
       # Order is a hard dependency, not a preference. Each stack is its own
       # root with its own state, and the later ones read the earlier ones
@@ -68,15 +157,16 @@ jobs:
       #   platform -> billing budget; last because it is the cheapest to retry
       #               and depends on nothing the others need.
       #
-      # `set -e` stops at the first failure, so a broken network stack never
-      # gets a chance to apply gke against stale outputs.
-      - name: Apply stacks in dependency order
+      # `set -e` stops at the first failure. `apply tfplan` refuses a plan whose
+      # state has moved since it was written — loud, never silent.
+      - name: Apply saved plans in dependency order
         shell: bash
         run: |
           set -euo pipefail
           for stack in network gke data platform; do
+            dir="infra/envs/dev/${stack}"
             echo "::group::apply ${stack}"
-            tofu -chdir="infra/envs/dev/${stack}" init -input=false
-            tofu -chdir="infra/envs/dev/${stack}" apply -input=false -auto-approve
+            tofu -chdir="${dir}" init -input=false
+            tofu -chdir="${dir}" apply -input=false -no-color tfplan
             echo "::endgroup::"
           done
