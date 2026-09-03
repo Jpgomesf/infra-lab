@@ -88,7 +88,26 @@ Gateway's `envoyService` has no `ports` field.
 3. Replace `REPLACE-tofu-state-bucket` in `infra/envs/dev/*/main.tf`.
 4. Apply stacks in order: `network` → `gke` → `data` → `platform`
    (`tofu init && tofu apply` in each; CI takes over after the first apply).
-5. Fill in `k8s/overlays/dev` (see its README).
+5. Cluster access: the control plane has **no public IP endpoint**. Fetch
+   credentials through the IAM-authenticated DNS endpoint —
+   `gcloud container clusters get-credentials lab-dev --location us-central1-a
+   --dns-endpoint --project <project>` — which needs `container.clusters.connect`
+   on your principal and nothing else. There is no personal-IP allowlist to
+   rotate; `var.authorized_networks` only restricts the private IP endpoint
+   inside the VPC.
+6. Fill in `k8s/overlays/dev` (see its README).
+
+### Pre-rebuild hardening (2026-09)
+
+Landed while the dev environment was down, because each item is a
+cluster-creation-time decision: Dataplane V2 (`datapath_provider =
+"ADVANCED_DATAPATH"` — without it GKE Standard accepts NetworkPolicy objects
+and ignores them), a dedicated node service account (the default compute SA
+carries `roles/editor`; Workload Identity protects the pod path only), shielded
+nodes with secure boot, GKE cost allocation, the DNS-based control-plane
+endpoint above, and the prod stacks' state `encryption {}` blocks. CI split its
+identity into a read-only plan SA and a reviewer-gated apply SA (see "CI"), and
+`tofu-apply` now applies the exact saved plan the run summary showed.
 
 ## Phase 2 — GCP prod
 
@@ -143,8 +162,8 @@ keeps the digests current and groups the bumps into one PR.
 | Workflow | Trigger | What it does |
 | --- | --- | --- |
 | `lint.yml` | PR, push to `main` | `make lint` on OpenTofu 1.12.3. `kubectl` is preinstalled on the `ubuntu-latest` runner image, so nothing installs it; a `kubectl version --client` step asserts that assumption instead of letting a runner-image change fail inside the Makefile. |
-| `tofu-plan.yml` | PR touching `infra/**` | `validate` (`tofu init -backend=false` + `tofu validate` over twelve `{env, stack}` pairs — dev ×4, prod ×4, aws-dev ×4 — as an explicit `include:` list, because the cluster stack is `gke` in the GCP envs and `eks` in the AWS one, so a cross product would ask for stacks that do not exist), `trivy-config` (misconfiguration scan of `infra/`, fails on HIGH/CRITICAL), and `plan` (matrix, cloud-touching — see the guard below), which posts one PR comment per stack and updates it in place on re-runs. `plan`/`apply` stay dev-scoped. |
-| `tofu-apply.yml` | push to `main` touching `infra/**` | Single job in the `production` environment: `tofu init` + `tofu apply -auto-approve` over `network` → `gke` → `data` → `platform`, stopping at the first failure. The order is a hard dependency — `gke` and `data` read `network`'s outputs through `terraform_remote_state`. |
+| `tofu-plan.yml` | PR touching `infra/**` | `validate` (`tofu init -backend=false` + `tofu validate` over twelve `{env, stack}` pairs — dev ×4, prod ×4, aws-dev ×4 — as an explicit `include:` list, because the cluster stack is `gke` in the GCP envs and `eks` in the AWS one, so a cross product would ask for stacks that do not exist), `trivy-config` (misconfiguration scan of `infra/`, fails on HIGH/CRITICAL), and `plan` (matrix, cloud-touching — see the guard below, runs as the read-only plan SA), which posts one PR comment per stack — a **resource-level summary**, not the full plan: the repo is public and a full plan maps private IPs and CIDRs; the full text stays in the job log. `plan`/`apply` stay dev-scoped. |
+| `tofu-apply.yml` | push to `main` touching `infra/**`, or manual | Two jobs. `plan dev` (read-only plan SA) writes a saved, **encrypted** plan per stack (`-out=tfplan`; the stack's `encryption { plan {} }` block covers it), uploads them as a 1-day artifact and prints a resource-level summary on the run page. `apply dev` (`production` environment, required reviewer, apply SA) downloads that artifact and runs `tofu apply tfplan` over `network` → `gke` → `data` → `platform`, stopping at the first failure — what the reviewer approved is exactly what applies. The order is a hard dependency — `gke` and `data` read `network`'s outputs through `terraform_remote_state`; a change that alters those outputs needs a second (manual) run after the first apply. |
 | `zizmor.yml` | PR touching `.github/workflows/**` | zizmor at the default `regular` persona. Blocking: findings fail the check. |
 | `tofu-drift.yml` | Mondays 09:00 UTC + manual | Weekly `tofu plan -detailed-exitcode` over the armed stacks; any drift opens/updates a single `drift`-labeled issue and fails the run. Inert until the WIF variables are set. |
 
@@ -181,7 +200,8 @@ Variables):
 | Variable | Value |
 | --- | --- |
 | `WIF_PROVIDER` | Full provider resource name printed at the end of `bootstrap.sh`. Setting it arms `plan`/`apply`. |
-| `WIF_SERVICE_ACCOUNT` | `tofu-ci@<project>.iam.gserviceaccount.com` — created by `bootstrap.sh` with a scoped role set (never `editor`/`owner`). Budgets additionally need `roles/billing.costsManager` on the billing account, a grant only a billing admin can make. |
+| `WIF_PLAN_SERVICE_ACCOUNT` | `tofu-plan@<project>.iam.gserviceaccount.com` — read-only (`roles/viewer`, object read on the state bucket, encrypt/decrypt on the state key). Any ref in the repo may impersonate it, which is what PR plans need. Until it is set, the plan jobs fall back to `WIF_SERVICE_ACCOUNT`. |
+| `WIF_SERVICE_ACCOUNT` | `tofu-ci@<project>.iam.gserviceaccount.com` — the apply SA, created by `bootstrap.sh` with a scoped role set (never `editor`/`owner`; the `projectIamAdmin` + `serviceAccountAdmin` pair is owner-equivalent in practice, which is exactly why only jobs running inside the reviewer-gated `production` environment can impersonate it — the WIF binding is on the environment-scoped OIDC subject, and the provider condition pins the repository's numeric id and owner id, not its name). Budgets additionally need `roles/billing.costsManager` on the billing account, a grant only a billing admin can make. |
 | `GCP_PROJECT_ID` | → `TF_VAR_project_id`. |
 | `GCP_PROJECT_NUMBER` | → `TF_VAR_project_number` (the `platform` stack's budget filter). |
 | `TF_STATE_BUCKET` | → `TF_VAR_state_bucket`, the bucket the `terraform_remote_state` lookups read. |
@@ -225,8 +245,11 @@ anything not listed there still fails the PR at HIGH/CRITICAL.
 ## State encryption (Phase 1, recommended)
 
 `sensitive = true` only redacts CLI output — secrets land in plaintext in the
-GCS state file. After `bootstrap.sh` creates the KMS key, add this block to
-each stack's `terraform {}` in `infra/envs/*/*/main.tf`:
+GCS state file. Every GCP stack (dev and prod) carries this block in its
+`terraform {}`; the prod copies reference a `REPLACE-prod-project` placeholder
+that `bootstrap.sh` tells you to fill in at prod bootstrap, alongside the state
+bucket. `tofu validate` never touches a backend, so a stack *without* the block
+passes CI silently — the block is the control, not the pipeline. For reference:
 
 ```hcl
 encryption {

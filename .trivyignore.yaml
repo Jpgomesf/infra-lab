@@ -14,12 +14,16 @@ misconfigurations:
 
   - id: AVD-GCP-0061
     statement: >-
-      Master authorized networks. The gke module does support them
-      (var.authorized_networks drives a dynamic
-      master_authorized_networks_config block), but the CIDR list is a personal
-      IP that must not be committed, so the default is empty and the scanner
-      sees an unconfigured cluster. Revisit once dev has a stable egress IP or
-      a bastion, and enable the block unconditionally then.
+      Master authorized networks. Not applicable rather than accepted: the gke
+      module disables the public IP endpoint outright
+      (private_cluster_config.enable_private_endpoint = true) and exposes the
+      control plane only through the IAM-authenticated DNS endpoint, so there
+      is no public address for an allowlist to protect. The check only looks
+      for a master_authorized_networks_config block and cannot see that the
+      endpoint it guards does not exist. The block is still supported
+      (var.authorized_networks) for restricting the *private* IP endpoint
+      inside the VPC. Retire this entry when trivy learns to read
+      enable_private_endpoint.
 
   - id: AVD-AWS-0039
     statement: >-
@@ -40,14 +44,15 @@ misconfigurations:
 
   - id: AVD-AWS-0040
     statement: >-
-      Public EKS control-plane endpoint. This is the AWS twin of AVD-GCP-0061
-      above, and it is accepted for the same reason: the eks module deliberately
-      mirrors the gke module's posture (private nodes, public API endpoint
-      restricted by var.authorized_networks), and the only CIDR that belongs in
-      that list is a personal IP that must not be committed. The module does
+      Public EKS control-plane endpoint. Accepted because the eks module
+      (apply-then-destroy lab only) keeps a public API endpoint restricted by
+      var.authorized_networks, and the only CIDR that belongs in that list is
+      a personal IP that must not be committed. The gke module no longer has
+      this problem — it closed the public IP endpoint in favour of the
+      IAM-authenticated DNS endpoint — but EKS has no equivalent. The module does
       support closing the endpoint entirely — set enable_public_endpoint =
       false — but that leaves the cluster unreachable without a bastion or VPN,
       which a laptop-driven lab cannot absorb. The check fires on
       endpoint_public_access = true regardless of the CIDR restriction, so
-      narrowing the list would not clear it. Retire this entry together with
-      AVD-GCP-0061 once there is a bastion or a stable egress IP.
+      narrowing the list would not clear it. Retire this entry if the AWS lab
+      ever gets a bastion or a stable egress IP.

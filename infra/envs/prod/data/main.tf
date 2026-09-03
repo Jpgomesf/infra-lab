@@ -6,6 +6,33 @@ terraform {
     prefix = "prod/data"
   }
 
+  # State encryption. The placeholder project is wired at prod bootstrap
+  # together with the state bucket; sensitive values (DB password, HMAC
+  # secret) would otherwise sit in plaintext in GCS.
+  encryption {
+    key_provider "gcp_kms" "state" {
+      kms_encryption_key = "projects/REPLACE-prod-project/locations/us-central1/keyRings/tofu/cryptoKeys/state"
+      key_length         = 32
+    }
+    method "aes_gcm" "state" {
+      keys = key_provider.gcp_kms.state
+    }
+    state {
+      method   = method.aes_gcm.state
+      enforced = true
+    }
+    plan {
+      method = method.aes_gcm.state
+    }
+    # terraform_remote_state reads need their own decryption config — the
+    # root state/plan blocks do not cover data sources.
+    remote_state_data_sources {
+      default {
+        method = method.aes_gcm.state
+      }
+    }
+  }
+
   required_providers {
     google = {
       source  = "hashicorp/google"
@@ -58,7 +85,7 @@ module "api_identity" {
   project_id = var.project_id
   namespace  = "app"
   ksa_name   = "api"
-  roles      = ["roles/storage.objectUser"]
+  # No project-level roles: object access is granted on the app bucket below.
 }
 
 module "app_bucket" {
@@ -71,6 +98,14 @@ module "app_bucket" {
   # 30-day undo window on top of versioning for real data.
   soft_delete_retention_seconds = 2592000
   hmac_service_account_email    = module.api_identity.identity
+}
+
+# Bucket-scoped, not project-scoped: a project-level objectUser would also
+# reach the state bucket and every future bucket in the project.
+resource "google_storage_bucket_iam_member" "api_objects" {
+  bucket = module.app_bucket.bucket
+  role   = "roles/storage.objectUser"
+  member = "serviceAccount:${module.api_identity.identity}"
 }
 
 # Prod-launch DR item (own stack when prod goes live): nightly SQL exports to

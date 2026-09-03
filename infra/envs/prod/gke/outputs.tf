@@ -9,3 +9,7 @@ output "endpoint" {
 output "workload_pool" {
   value = module.cluster.workload_pool
 }
+
+output "dns_endpoint" {
+  value = module.cluster.dns_endpoint
+}

@@ -10,6 +10,12 @@ resource "google_container_cluster" "this" {
   initial_node_count       = 1
   deletion_protection      = var.deletion_protection
 
+  # Dataplane V2 (Cilium). Without it GKE Standard accepts NetworkPolicy
+  # objects and silently ignores them; the default-deny in k8s/base would be
+  # decorative. Creation-time only — changing it recreates the cluster.
+  datapath_provider     = "ADVANCED_DATAPATH"
+  enable_shielded_nodes = true
+
   release_channel {
     channel = var.release_channel
   }
@@ -19,10 +25,25 @@ resource "google_container_cluster" "this" {
     services_secondary_range_name = var.services_range_name
   }
 
+  # No public IP endpoint. Humans and CI reach the control plane through the
+  # IAM-authenticated DNS endpoint (see control_plane_endpoints_config); the
+  # private IP endpoint stays for in-VPC callers and is what
+  # var.authorized_networks now restricts.
   private_cluster_config {
     enable_private_nodes    = true
-    enable_private_endpoint = false
+    enable_private_endpoint = true
     master_ipv4_cidr_block  = var.master_cidr
+  }
+
+  control_plane_endpoints_config {
+    dns_endpoint_config {
+      # Reachable from anywhere, but every request is IAM-authenticated and
+      # needs container.clusters.connect — no CIDR allowlist to rotate.
+      allow_external_traffic = true
+    }
+    ip_endpoints_config {
+      enabled = true
+    }
   }
 
   dynamic "master_authorized_networks_config" {
@@ -42,12 +63,23 @@ resource "google_container_cluster" "this" {
     workload_pool = "${var.project_id}.svc.id.goog"
   }
 
+  # Both free: BASIC posture surfaces workload misconfigurations, cost
+  # allocation labels usage per namespace in the billing export.
+  security_posture_config {
+    mode               = "BASIC"
+    vulnerability_mode = "VULNERABILITY_BASIC"
+  }
+
+  cost_management_config {
+    enabled = true
+  }
+
   logging_config {
     enable_components = var.logging_components
   }
 
   monitoring_config {
-    enable_components = ["SYSTEM_COMPONENTS"]
+    enable_components = var.monitoring_components
     managed_prometheus {
       enabled = var.enable_managed_prometheus
     }
@@ -75,6 +107,11 @@ resource "google_container_node_pool" "spot" {
 
     labels = {
       pool = "spot"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
 
     workload_metadata_config {
@@ -105,6 +142,11 @@ resource "google_container_node_pool" "on_demand" {
 
     labels = {
       pool = "on-demand"
+    }
+
+    shielded_instance_config {
+      enable_secure_boot          = true
+      enable_integrity_monitoring = true
     }
 
     workload_metadata_config {
